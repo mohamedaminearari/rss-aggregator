@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,21 +10,41 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
+	"github.com/mohamedaminearari/rss-aggregator/internal/database"
+
+	_ "github.com/lib/pq"
 )
+
+type apiConfig struct {
+	DB *database.Queries
+}
 
 func main() {
 	fmt.Println("Loading env variables...")
 	godotenv.Load()
-
 	portString := os.Getenv("PORT")
 	if portString == "" {
 		log.Fatal("PORT is not found in the environment")
 	}
+	dbURL := os.Getenv("DB_URL")
+	if dbURL == "" {
+		log.Fatal("DB_URL is not found in the environment")
+	}
 	fmt.Println("Finished loading env variables.")
+
+	fmt.Println("Connecting to the database...")
+	conn, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatal("Cannot connect to the database:", err)
+	}
+	queries := database.New(conn)
+	apiCfg := apiConfig{
+		DB: queries,
+	}
+	fmt.Println("Finished Connecting to the database.")
 
 	fmt.Println("Creating Server...")
 	router := chi.NewRouter()
-
 	router.Use(
 		cors.Handler(cors.Options{
 			AllowedOrigins:   []string{"https://*", "http://*"},
@@ -34,20 +55,20 @@ func main() {
 			MaxAge:           300,
 		}),
 	)
-
 	v1Router := chi.NewRouter()
 	v1Router.Get("/healthz", handlerReadiness)
+	v1Router.Get("/users", apiCfg.handlerGetUser)
+	v1Router.Post("/users", apiCfg.handlerCreateUser)
 	v1Router.Get("/err", handlerErr)
-
 	router.Mount("/v1", v1Router)
-
 	srv := &http.Server{
 		Handler: router,
 		Addr:    ":" + portString,
 	}
+	fmt.Println("Finished Creating Server.")
 
 	fmt.Println("Starting Server on PORT:", portString)
-	err := srv.ListenAndServe()
+	err = srv.ListenAndServe()
 	if err != nil {
 		log.Fatal(err)
 	}
